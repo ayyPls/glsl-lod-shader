@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js InstancedMesh with DataTexture</title>
+    <style>
+        body {
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.153.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+
+        // Set up scene, camera, and renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        const controls = new OrbitControls(camera, renderer.domElement);
+
+        camera.position.z = 100;
+
+        // Cube geometry
+        const cubeGeometry = new THREE.BoxGeometry(1, 1, 1);
+        const distanceToLOD = 40.0
+
+        // Shader material with distance-based level of details
+        const cubeMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                distanceThreshold: { value: distanceToLOD },
+                cubeColor: { value: new THREE.Color(0x00ff00) },
+                boxDimensions: { value: new THREE.Vector3(1, 1, 1) },
+            },
+            vertexShader: `
+                uniform float distanceThreshold;
+                uniform vec3 boxDimensions;
+
+                varying float vDistance;
+
+                void main() {
+                    // Calculate the cube's center in world space for each instance
+                    vec3 instancePosition = vec3(instanceMatrix[3].x, instanceMatrix[3].y, instanceMatrix[3].z);
+                    vDistance = distance(cameraPosition, instancePosition);
+
+                    if (vDistance < distanceThreshold) {
+                        // Render as a regular 3D cube within the threshold distance
+                        gl_Position = projectionMatrix * viewMatrix * instanceMatrix * modelMatrix * vec4(position, 1.0);
+                    } else {
+                        // Render as a 2D billboard when beyond the threshold distance
+
+                        // Calculate direction from camera to instance position in world space
+                        vec3 cameraToInstance = normalize(instancePosition - cameraPosition);
+
+                        // Initialize billboard dimensions for the closest face
+                        vec2 billboardScale = boxDimensions.zy; // Default to front/back face dimensions (Z axis)
+
+                        // Determine which face is closest and set billboard scale accordingly
+                        float absX = abs(cameraToInstance.x);
+                        float absY = abs(cameraToInstance.y);
+                        float absZ = abs(cameraToInstance.z);
+
+                        if (absX > absY && absX > absZ) {
+                        // Closest face is on the X axis (side view)
+                        billboardScale = boxDimensions.yz; // Width is height, height is depth (Y, Z dimensions)
+                        } else if (absY > absX && absY > absZ) {
+                        // Closest face is on the Y axis (top/bottom view)
+                        billboardScale = boxDimensions.xz; // Width is width, height is depth (X, Z dimensions)
+                        } else {
+                        // Closest face is on the Z axis (front or back view)
+                        billboardScale = boxDimensions.xy; // Width is width, height is height (X, Y dimensions)
+                        }
+                        
+                        // Calculate the position in view space centered on the object
+                        vec4 viewPosition = viewMatrix * instanceMatrix * modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+
+                        // Apply offset to create a quad that matches the closest face's dimensions
+                        vec4 offset = vec4(position.xy * billboardScale, 0.0, 0.0);
+                        gl_Position = projectionMatrix * (viewPosition + offset);
+                    }
+                }
+                `,
+            fragmentShader: `
+                    uniform vec3 cubeColor;    
+                    void main() {
+                        // Simply set the color of the fragment to the cube color
+                        gl_FragColor = vec4(cubeColor, 1.0);
+                    }
+                `,
+            transparent: true,
+            wireframe: true
+        });
+
+        const instancedCount = 100000
+        const matrix = new THREE.Matrix4()
+        const cubes = new THREE.InstancedMesh(cubeGeometry, cubeMaterial, instancedCount)
+
+        const randomizeMatrix = function () {
+            const position = new THREE.Vector3();
+            const quaternion = new THREE.Quaternion();
+            const scale = new THREE.Vector3(1, 1, 1);
+
+            return function (matrix) {
+                position.x = Math.random() * 1000 - 20;
+                position.y = Math.random() * 1000 - 20;
+                position.z = Math.random() * 1000 - 20;
+                quaternion.random();
+                // // scale.x = Math.random() * 3;
+                // // scale.y = Math.random() * 3;
+                // // scale.z = Math.random() * 3;
+
+                matrix.compose(position, quaternion, scale);
+
+            };
+        }();
+        for (let i = 0; i <= instancedCount; i++) {
+            randomizeMatrix(matrix);
+            cubes.setMatrixAt(i, matrix);
+        }
+        scene.add(cubes)
+
+        // Render loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // cube.rotation.x += 0.01;
+            // cube.rotation.y += 0.01;
+            controls.update()
+            renderer.render(scene, camera);
+
+        }
+        animate();
+
+    </script>
+</body>
+
+</html>
+
+
+<!-- vertexShader: `
+                uniform float distanceThreshold;
+                varying float vDistance;
+
+                void main() {
+                // Calculate distance between camera and vertex
+                vDistance = distance(cameraPosition, position);
+                
+                // Set vertex position
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `, -->
+
+
+
+<!-- 
+
+            const cubeMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    // cameraPosition: { value: camera.position },
+                    distanceThreshold: { value: distanceThreshold }
+                },
+                vertexShader: `
+                varying float vDistance;
+    
+                void main() {
+                    // Calculate distance between camera and vertex using built-in cameraPosition
+                    vec3 cubeCenter = vec3(modelMatrix * vec4(0.0, 0.0, 0.0, 1.0));
+                    vDistance = distance(cameraPosition, cubeCenter);
+    
+                    // Set vertex position
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+                `,
+                fragmentShader: `
+                varying float vDistance;
+                uniform float distanceThreshold;
+    
+                void main() {
+                if (vDistance < distanceThreshold) {
+                    // Render cube normally
+                    gl_FragColor = vec4(1.0, 0.5, 0.2, 1.0);
+                } else {
+                     // Render a point at the center when the distance is above the threshold
+                    vec2 uv = gl_FragCoord.xy / vec2(1000.0, 1000.0); // Normalized screen coordinates
+                    float distanceToCenter = length(uv - 0.5);
+    
+                    // Only display a single point by drawing it only at the center pixel
+                    if (distanceToCenter < 0.01) {
+                        gl_FragColor = vec4(1.0, 1.0, 1.0, 1.0); // White point color
+                    } else {
+                        discard; // Discard other fragments
+                    }
+                }
+            }
+            `,
+                transparent: true
+            }); -->
+
+
+
+
+<!-- 
+            const cubeMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    pointSize: { value: 20 }, // size of point rendered as level of details on `distanceThreshold` distance from camera
+                    resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                    distanceThreshold: { value: distanceThreshold },
+                    cubeColor: { value: new THREE.Color("pink") },
+                    pointColor: { value: new THREE.Color("blue") },
+                },
+                vertexShader: `
+                varying float vDistance;
+                varying vec4 vCenterPosition;
+    
+                void main() {
+                    // Calculate distance from camera to the center of the cube
+                    vec3 cubeCenter = vec3(modelMatrix * vec4(0.0, 0.0, 0.0, 1.0));
+                    vDistance = distance(cameraPosition, cubeCenter);
+                    
+                    // Project the cube center position to screen space
+                    vCenterPosition = projectionMatrix * modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+    
+                    // Automatically set point size based on distance and resolution
+                    // float scale = clamp((vDistance - distanceThreshold) / distanceThreshold, 0.0, 1.0);
+                    // vPointSize = mix(5.0, 20.0, scale) * (resolution.y / 800.0); // Scale factor based on distance and resolution
+    
+                    // Set vertex position
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+                `,
+                fragmentShader: `
+                varying float vDistance;
+                varying vec4 vCenterPosition;
+                uniform float distanceThreshold;
+                uniform float pointSize;
+                uniform vec2 resolution;
+                uniform vec3 cubeColor;
+                uniform vec3 pointColor;
+    
+                void main() {
+                    if (vDistance < distanceThreshold) {
+                        // Render cube normally when close to the camera
+                        gl_FragColor = vec4(cubeColor, 1.0);
+                    } else {
+                        // Convert the center position from clip space to normalized device coordinates
+                        vec2 centerNDC = vCenterPosition.xy / vCenterPosition.w;
+                        
+                        // Convert to screen space coordinates
+                        vec2 centerScreen = (centerNDC * 0.5 + 0.5) * resolution;
+    
+                        // Calculate distance from fragment to the center point
+                        float dist = length(gl_FragCoord.xy - centerScreen);
+    
+                        // Draw a larger point as a circle with the specified pointSize
+                        if (dist < pointSize * 0.5) {
+                            gl_FragColor = vec4(pointColor, 1.0);
+                        } else {
+                            discard; // Discard fragments outside the point circle
+                        }
+                    }
+                }
+            `,
+                transparent: true
+            }); -->
+
+
+<!-- doesnt work, idea to show only one rotated face of cube instead of point? -->
+<!-- const cubeMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                    cameraPosition: { value: new THREE.Vector3() },
+                    cubeColor: { value: new THREE.Color("pink") }
+                },
+                vertexShader: `
+                    varying vec3 vNormal;
+                    varying vec3 vPosition;
+    
+                    // Function to create a rotation matrix from axis-angle representation
+                    mat4 rotationMatrix(vec3 axis, float angle) {
+                        float c = cos(angle);
+                        float s = sin(angle);
+                        float t = 1.0 - c;
+    
+                        return mat4(
+                            vec4(t * axis.x * axis.x + c, t * axis.x * axis.y - s * axis.z, t * axis.x * axis.z + s * axis.y, 0.0),
+                            vec4(t * axis.x * axis.y + s * axis.z, t * axis.y * axis.y + c, t * axis.y * axis.z - s * axis.x, 0.0),
+                            vec4(t * axis.x * axis.z - s * axis.y, t * axis.y * axis.z + s * axis.x, t * axis.z * axis.z + c, 0.0),
+                            vec4(0.0, 0.0, 0.0, 1.0)
+                        );
+                    }
+    
+                    void main() {
+                        // Get the direction vector from the cube's center to the camera
+                        vec3 toCamera = normalize(cameraPosition - position);
+    
+                        // Define the forward direction of the face (assuming we want the cube's front face to face the camera)
+                        vec3 forward = vec3(0.0, 0.0, 1.0);
+    
+                        // Calculate the axis of rotation needed to align the forward vector to the camera direction
+                        vec3 axis = cross(forward, toCamera);
+                        float angle = acos(dot(forward, toCamera));
+    
+                        // Check for near-zero axis (when the forward vector is already aligned with the camera)
+                        if (length(axis) < 0.0001) {
+                            axis = vec3(0.0, 1.0, 0.0); // Arbitrary axis, as no rotation is needed
+                        }
+    
+                        // Construct the rotation matrix from axis and angle
+                        mat4 rotationMat = rotationMatrix(axis, angle);
+    
+                        // Apply the rotation to the cube's vertex normal and position
+                        vNormal = normalize((rotationMat * vec4(normal, 0.0)).xyz);
+                        vPosition = (rotationMat * vec4(position, 1.0)).xyz;
+    
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(vPosition, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                varying vec3 vNormal;
+                uniform vec3 cubeColor;
+    
+                void main() {
+                    // Simple lighting based on the normal (for a lit face)
+                    float brightness = dot(vNormal, vec3(0.0, 0.0, 1.0));  // Lighting from the camera
+                    gl_FragColor = vec4(cubeColor * brightness, 1.0);
+                }
+        `,
+                transparent: true
+            }); -->
+
+
+
+
+
+
+
+
+
+<!-- working lod -->
+<!-- 
+            const cubeMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    distanceThreshold: { value: 50.0 },  // distance on what  
+                    cubeColor: { value: new THREE.Color(0x00ff00) },
+                    cubeColor: { value: new THREE.Color(0x00ff00) },  // Color for 3D rendering
+                    scale: { value: 1.0 } // Scale of the billboard square
+    
+                },
+                vertexShader: `
+                    uniform float distanceThreshold;
+                    uniform float scale;
+    
+                    varying vec2 vUv;
+                    varying float vDistance;
+    
+                    void main() {
+                    // Calculate the distance between the camera and the cube's center
+                    vDistance = distance(cameraPosition, vec3(modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)));
+    
+                    if (vDistance < distanceThreshold) {
+                        // Render as a regular 3D cube within the threshold distance
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    } else {
+                        // Render as a 2D billboard when beyond the threshold distance
+    
+                        // Define UVs for the square (used to map each vertex to screen space)
+                        vUv = position.xy * 0.5 + 0.5;
+    
+                        // Calculate billboard position directly in camera space
+                        vec3 billboardPosition = cameraPosition + normalize(position) * scale;
+    
+                        // Position vertices to form a square facing the camera
+                        vec4 viewPosition = viewMatrix * modelMatrix * vec4(0.0, 0.0, 0.0, 1.0); // Center of the object
+                        vec4 offset = vec4(position.xy * scale, 0.0, 0.0); // Flat quad size
+                        gl_Position = projectionMatrix * (viewPosition + offset);
+                    }
+                    }
+                `,
+                fragmentShader: `
+                    uniform vec3 cubeColor;
+                    varying float vDistance;
+    
+                    void main() {
+                        // Simply set the color of the fragment to the cube color
+                        gl_FragColor = vec4(cubeColor, 1.0);
+                    }
+                `,
+                transparent: true,
+            }); -->
